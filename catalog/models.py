@@ -96,3 +96,74 @@ class Author(models.Model):
         String for representing the Model object.
         """
         return '%s, %s' % (self.last_name, self.first_name)
+
+from django import forms
+from django.core.exceptions import ValidationError
+from django.utils.translation import ugettext_lazy as _
+import datetime #for checking renewal date range.
+class RenewBookForm(forms.Form):
+    renewal_date = forms.DateField(help_text="Enter a date between now and 4 weeks (default 3).")
+    def clean_due_back(self):
+       data = self.cleaned_data['due_back']
+       
+       #Проверка того, что дата не в прошлом
+       if data < datetime.date.today():
+           raise ValidationError(_('Invalid date - renewal in past'))
+
+       #Check date is in range librarian allowed to change (+4 weeks)
+       if data > datetime.date.today() + datetime.timedelta(weeks=4):
+           raise ValidationError(_('Invalid date - renewal more than 4 weeks ahead'))
+
+       # Не забывайте всегда возвращать очищенные данные
+       return data
+
+    class Meta:
+        model = BookInstance
+        fields = ['due_back',]
+        labels = { 'due_back': _('Renewal date'), }
+        help_texts = { 'due_back': _('Enter a date between now and 4 weeks (default 3).'), } 
+    class Meta:
+        model = BookInstance
+        fields = ['due_back',]
+        labels = { 'due_back': _('Renewal date'), }
+        help_texts = { 'due_back': _('Enter a date between now and 4 weeks (default 3).'), } 
+    def clean_renewal_date(self):
+        data = self.cleaned_data['renewal_date']
+        
+        #Проверка того, что дата не выходит за "нижнюю" границу (не в прошлом). 
+        if data < datetime.date.today():
+            raise ValidationError(_('Invalid date - renewal in past'))
+
+        #Проверка того, то дата не выходит за "верхнюю" границу (+4 недели).
+        if data > datetime.date.today() + datetime.timedelta(weeks=4):
+            raise ValidationError(_('Invalid date - renewal more than 4 weeks ahead'))
+
+        # Помните, что всегда надо возвращать "очищенные" данные.
+        return data
+        from .forms import RenewBookForm
+
+def renew_book_librarian(request, pk):
+    book_inst = get_object_or_404(BookInstance, pk=pk)
+
+    # Если данный запрос типа POST, тогда
+    if request.method == 'POST':
+
+        # Создаем экземпляр формы и заполняем данными из запроса (связывание, binding):
+        form = RenewBookForm(request.POST)
+
+        # Проверка валидности данных формы:
+        if form.is_valid():
+            # Обработка данных из form.cleaned_data 
+            #(здесь мы просто присваиваем их полю due_back)
+            book_inst.due_back = form.cleaned_data['renewal_date']
+            book_inst.save()
+
+            # Переход по адресу 'all-borrowed':
+            return HttpResponseRedirect(reverse('all-borrowed') )
+
+    # Если это GET (или какой-либо еще), создать форму по умолчанию.
+    else:
+        proposed_renewal_date = datetime.date.today() + datetime.timedelta(weeks=3)
+        form = RenewBookForm(initial={'renewal_date': proposed_renewal_date,})
+
+    return render(request, 'catalog/book_renew_librarian.html', {'form': form, 'bookinst':book_inst})
